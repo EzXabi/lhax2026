@@ -1,34 +1,43 @@
 import { textToSpeech } from "@/lib/elevenlabs";
+import { body, failure, json, privateHeaders, string } from "@/lib/server/http";
+import { cardView } from "@/lib/server/moments";
+import { rateLimit, requireSession, sameOrigin } from "@/lib/server/session";
 
-// Keeps a stray request from burning through the hackathon credits.
-const MAX_CHARS = 1000;
-
+export const runtime = "nodejs";
 export async function POST(request: Request) {
-  const body = await request.json().catch(() => null);
-  const text: unknown = body?.text;
-
-  if (typeof text !== "string" || !text.trim()) {
-    return Response.json(
-      { error: "Send JSON like { \"text\": \"Hallo\" }." },
-      { status: 400 },
-    );
-  }
-  if (text.length > MAX_CHARS) {
-    return Response.json(
-      { error: `Text is limited to ${MAX_CHARS} characters.` },
-      { status: 413 },
-    );
-  }
-
   try {
-    const audio = await textToSpeech(text);
+    sameOrigin(request);
+    const { sub } = requireSession(request);
+    const data = await body(request);
+    const cardId = string(data.cardId);
+    const card = cardView(sub, cardId);
+    rateLimit(`voice:${sub}`, 5, 60_000);
+    if (!process.env.ELEVENLABS_API_KEY)
+      return json(
+        {
+          error:
+            "Voice is not set up for this demo. You can still read the full checklist below.",
+        },
+        503,
+      );
+    const text = `${card.title}. ${card.body} ${card.checklist.map((c) => c.text).join(" ")}`;
+    if (text.length > 1000)
+      return json(
+        {
+          error:
+            "This card is too long to read aloud. Please use the written checklist.",
+        },
+        400,
+      );
+    const stream = await textToSpeech(text);
+    // Check permission again after the external call, before returning any audio.
+    const audio = await new Response(stream).arrayBuffer();
+    cardView(sub, cardId);
+    requireSession(request);
     return new Response(audio, {
-      headers: { "Content-Type": "audio/mpeg", "Cache-Control": "no-store" },
+      headers: { ...privateHeaders, "Content-Type": "audio/mpeg" },
     });
   } catch (error) {
-    console.error("[tts]", error);
-    const message =
-      error instanceof Error ? error.message : "Text to speech failed.";
-    return Response.json({ error: message }, { status: 500 });
+    return failure(error);
   }
 }
