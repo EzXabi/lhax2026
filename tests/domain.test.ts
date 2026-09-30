@@ -23,6 +23,7 @@ import {
   verifyToken,
 } from "../src/lib/server/session";
 import { DomainError, resetStore, store } from "../src/lib/server/store";
+import { addGoal, bookAppointment, ownMoney, setBudget, setSetting } from "../src/lib/server/services";
 
 beforeEach(() => {
   resetStore();
@@ -268,4 +269,35 @@ test("login throttles repeated wrong-password attempts", () => {
     () => login("maria", "wrong-password"),
     (error: unknown) => error instanceof DomainError && error.status === 429,
   );
+});
+
+test("new synthetic money features remain in the signed-in person's snapshot", () => {
+  setBudget("maria", "Groceries", 250);
+  addGoal("maria", "Garden", 700);
+  setSetting("maria", "largeText", true);
+  const maria = snapshot("maria");
+  const tom = snapshot("tom");
+  assert.equal(maria.money.budgets.find((b) => b.category === "Groceries")?.limit, 250);
+  assert.equal(maria.money.goals.find((g) => g.name === "Garden")?.target, 700);
+  assert.equal(maria.settings.largeText, true);
+  assert.equal(tom.money.goals.some((g) => g.name === "Garden"), false);
+  assert.equal(tom.money.accounts.some((a) => a.id === "maria-current"), false);
+  assert.equal(ownMoney("tom").accounts.some((a) => a.id === "maria-current"), false);
+});
+
+test("sensitive reported moments stay private even with a moments grant", () => {
+  joinMaria();
+  setConsent("maria", "maria", "tom", "moments", true);
+  reportMoment("maria", "illness");
+  assert.equal(snapshot("maria").ownMoments.some((m) => m.label.includes("illness")), true);
+  assert.equal(snapshot("tom").cards.length, 0);
+  assert.equal(snapshot("tom").household!.members.find((m) => m.id === "maria")!.moments?.length, 0);
+});
+
+test("demo appointments are own records and invalid dates are rejected", () => {
+  const future = new Date(Date.now() + 2 * 86400000).toISOString();
+  bookAppointment("sofie", "General question", future, "Phone call");
+  assert.equal(snapshot("sofie").appointments.length, 1);
+  assert.equal(snapshot("tom").appointments.length, 0);
+  denied(() => bookAppointment("sofie", "General question", "2020-01-01", "Phone call"));
 });

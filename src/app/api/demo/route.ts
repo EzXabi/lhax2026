@@ -12,6 +12,8 @@ import {
   syncCards,
 } from "@/lib/server/moments";
 import { setConsent } from "@/lib/server/permissions";
+import { isMomentType } from "@/lib/moment-catalog";
+import { addGoal, bookAppointment, setBudget, setSetting } from "@/lib/server/services";
 import { requireSession, sameOrigin } from "@/lib/server/session";
 import { audit, DomainError, resetStore } from "@/lib/server/store";
 
@@ -62,7 +64,21 @@ export async function POST(request: Request) {
         break;
       }
       case "report":
-        reportMoment(sub);
+        if (data.type !== undefined && !isMomentType(data.type)) throw new DomainError("Choose a supported life moment.");
+        reportMoment(sub, data.type ?? "parent_moves_in");
+        break;
+      case "budget":
+        setBudget(sub, string(data.category), Number(data.limit));
+        break;
+      case "goal":
+        addGoal(sub, string(data.name), Number(data.target));
+        break;
+      case "appointment":
+        bookAppointment(sub, string(data.topic), string(data.date), string(data.channel));
+        break;
+      case "setting":
+        if ((data.key !== "largeText" && data.key !== "quietMode") || typeof data.value !== "boolean") throw new DomainError("Choose a valid setting.");
+        setSetting(sub, data.key, data.value);
         break;
       case "dismiss":
         changeCard(sub, string(data.cardId), "dismiss");

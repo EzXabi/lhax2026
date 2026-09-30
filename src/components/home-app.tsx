@@ -1,193 +1,80 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type FormEvent,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { CardView, Category, Snapshot } from "@/lib/contracts";
-import { HouseIllustration, Icon } from "./icons";
+import { momentCatalog, momentTypes, type MomentType } from "@/lib/moment-catalog";
+import { Icon } from "./icons";
 
-type Tab = "today" | "home" | "me" | "privacy";
+type View = "today" | "money" | "moments" | "household" | "mykbc";
 type ModalName = "report" | "leave" | "reset" | null;
 const personas = [
-  { id: "sofie", name: "Sofie", note: "Start the household story" },
-  { id: "tom", name: "Tom", note: "See what is shared with you" },
-  { id: "maria", name: "Maria", note: "Choose what to share" },
+  { id: "sofie", name: "Sofie" },
+  { id: "tom", name: "Tom" },
+  { id: "maria", name: "Maria" },
 ];
 const generalChecklist = [
   "Review your home insurance information together.",
   "Discuss household arrangements and everyday responsibilities.",
   "Choose which information to share, and with whom.",
 ];
-const money = (value: number) =>
-  new Intl.NumberFormat("en-BE", { style: "currency", currency: "EUR" }).format(
-    value,
-  );
-const date = (value: string) =>
-  new Date(value).toLocaleString("en-GB", {
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
+const money = (value: number) => new Intl.NumberFormat("en-BE", { style: "currency", currency: "EUR" }).format(value);
+const date = (value: string) => new Date(value).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+
 class ApiError extends Error {
-  constructor(
-    message: string,
-    public status: number,
-  ) {
-    super(message);
-  }
+  constructor(message: string, public status: number) { super(message); }
 }
-async function request(
-  path: string,
-  method = "GET",
-  data?: unknown,
-  signal?: AbortSignal,
-) {
+async function request(path: string, method = "GET", data?: unknown, signal?: AbortSignal) {
   const response = await fetch(path, {
-    method,
-    cache: "no-store",
-    credentials: "same-origin",
-    signal,
+    method, cache: "no-store", credentials: "same-origin", signal,
     headers: data ? { "Content-Type": "application/json" } : undefined,
     body: data ? JSON.stringify(data) : undefined,
   });
   const result = await response.json();
-  if (!response.ok)
-    throw new ApiError(
-      result.error || "Something went wrong. Please try again.",
-      response.status,
-    );
+  if (!response.ok) throw new ApiError(result.error || "Something went wrong. Please try again.", response.status);
   return result;
 }
-function Avatar({
-  id,
-  name,
-  small = false,
-}: {
-  id: string;
-  name: string;
-  small?: boolean;
-}) {
-  return (
-    <span
-      className={`avatar avatar-${id} ${small ? "avatar-small" : ""}`}
-      aria-hidden="true"
-    >
-      {name.charAt(0)}
-    </span>
-  );
+function Avatar({ id, name }: { id: string; name: string }) {
+  return <span className={`avatar avatar-${id}`} aria-hidden="true">{name.charAt(0)}</span>;
 }
 function Brand() {
-  return (
-    <div className="brand">
-      <span className="kbc-mark">
-        <i />
-        KBC
-      </span>
-      <span className="brand-divider" />
-      <span>
-        Home<span className="brand-dot">.</span>
-      </span>
-    </div>
-  );
+  return <div className="brand"><span className="brand-ring" aria-hidden="true"/><span>KBC Circle</span></div>;
 }
-function Modal({
-  title,
-  children,
-  close,
-}: {
-  title: string;
-  children: ReactNode;
-  close: () => void;
-}) {
+function Modal({ title, children, close }: { title: string; children: ReactNode; close: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    ref.current?.showModal();
-  }, []);
-  return (
-    <dialog
-      ref={ref}
-      className="modal"
-      aria-labelledby="modal-title"
-      onCancel={close}
-    >
-      <div className="section-heading">
-        <h2 id="modal-title">{title}</h2>
-        <button
-          className="icon-button"
-          onClick={close}
-          aria-label="Close dialog"
-        >
-          <Icon name="close" />
-        </button>
-      </div>
-      {children}
-    </dialog>
-  );
+  useEffect(() => { ref.current?.showModal(); }, []);
+  return <dialog ref={ref} className="modal" aria-labelledby="modal-title" onCancel={close}>
+    <div className="modal-heading"><h2 id="modal-title">{title}</h2><button className="icon-button" onClick={close} aria-label="Close dialog"><Icon name="close" size={20}/></button></div>
+    {children}
+  </dialog>;
 }
 
 export function HomeApp() {
   const [data, setData] = useState<Snapshot | null>(null);
   const [ready, setReady] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
-  const [tab, setTab] = useState<Tab>("today");
+  const [view, setView] = useState<View>("today");
   const [persona, setPersona] = useState("sofie");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [token, setToken] = useState("");
-  const [invite, setInvite] = useState<{
-    url: string;
-    expiresAt: string;
-  } | null>(null);
+  const [invite, setInvite] = useState<{ url: string; expiresAt: string } | null>(null);
   const [invitee, setInvitee] = useState("maria");
   const [modal, setModal] = useState<ModalName>(null);
   const [temporary, setTemporary] = useState(false);
   const [temporaryDone, setTemporaryDone] = useState<number[]>([]);
-  const [speaking, setSpeaking] = useState<string | null>(null);
-  const audio = useRef<{
-    element: HTMLAudioElement;
-    url: string;
-    cardId: string;
-  } | null>(null);
-  const audioVersion = useRef(0);
-  const requestedAudioCard = useRef<string | null>(null);
   const readController = useRef<AbortController | null>(null);
   const version = useRef(0);
   const mutationInFlight = useRef(false);
   const temporaryRef = useRef(false);
   const refreshFailed = useRef(false);
 
-  const stopAudio = useCallback(() => {
-    ++audioVersion.current;
-    requestedAudioCard.current = null;
-    if (audio.current) {
-      audio.current.element.pause();
-      URL.revokeObjectURL(audio.current.url);
-      audio.current = null;
-    }
-    setSpeaking(null);
+  const applySnapshot = useCallback((next: Snapshot) => {
+    setData(next);
+    setAuthenticated(true);
+    setReady(true);
   }, []);
-  const applySnapshot = useCallback(
-    (next: Snapshot) => {
-      if (
-        requestedAudioCard.current &&
-        !next.cards.some((c) => c.id === requestedAudioCard.current)
-      )
-        stopAudio();
-      setData(next);
-      setAuthenticated(true);
-      setReady(true);
-    },
-    [stopAudio],
-  );
   const refresh = useCallback(async () => {
     if (mutationInFlight.current || temporaryRef.current) return;
     const sequence = ++version.current;
@@ -195,12 +82,7 @@ export function HomeApp() {
     const controller = new AbortController();
     readController.current = controller;
     try {
-      const next: Snapshot = await request(
-        "/api/demo",
-        "GET",
-        undefined,
-        controller.signal,
-      );
+      const next: Snapshot = await request("/api/demo", "GET", undefined, controller.signal);
       if (sequence === version.current) {
         applySnapshot(next);
         if (refreshFailed.current) setError("");
@@ -209,7 +91,6 @@ export function HomeApp() {
     } catch (err) {
       if (controller.signal.aborted || sequence !== version.current) return;
       setData(null);
-      stopAudio();
       setReady(true);
       refreshFailed.current = true;
       if (err instanceof ApiError && err.status === 401) {
@@ -217,23 +98,19 @@ export function HomeApp() {
         setTemporary(false);
         setTemporaryDone([]);
         setInvite(null);
-      } else
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Could not refresh your information. Please try again.",
-        );
+      } else setError(err instanceof Error ? err.message : "Could not refresh your information. Please try again.");
     }
-  }, [applySnapshot, stopAudio]);
+  }, [applySnapshot]);
+
   useEffect(() => {
     function readFragment() {
-      const fragment = new URLSearchParams(window.location.hash.slice(1));
-      const invitation = fragment.get("invite");
+      const invitation = new URLSearchParams(window.location.hash.slice(1)).get("invite");
       if (invitation) {
         setToken(invitation);
-        setTab("home");
+        setView("household");
         window.history.replaceState(null, "", window.location.pathname);
-      } else if (window.location.hash === "#privacy") setTab("privacy");
+      } else if (["#privacy", "#sharing"].includes(window.location.hash)) setView("mykbc");
+      else if (window.location.hash === "#household") setView("household");
     }
     async function start() {
       readFragment();
@@ -241,1338 +118,181 @@ export function HomeApp() {
     }
     void start();
     window.addEventListener("hashchange", readFragment);
-    return () => {
-      window.removeEventListener("hashchange", readFragment);
-      readController.current?.abort();
-      if (audio.current) {
-        audio.current.element.pause();
-        URL.revokeObjectURL(audio.current.url);
-      }
-    };
+    return () => { window.removeEventListener("hashchange", readFragment); readController.current?.abort(); };
   }, [refresh]);
   useEffect(() => {
     if (!authenticated || temporary) return;
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") void refresh();
-    }, 2000);
-    const focus = () => {
-      if (document.visibilityState === "visible") void refresh();
-    };
+    const timer = window.setInterval(() => { if (document.visibilityState === "visible") void refresh(); }, 2000);
+    const focus = () => { if (document.visibilityState === "visible") void refresh(); };
     window.addEventListener("focus", focus);
     document.addEventListener("visibilitychange", focus);
-    return () => {
-      clearInterval(timer);
-      window.removeEventListener("focus", focus);
-      document.removeEventListener("visibilitychange", focus);
-    };
+    return () => { clearInterval(timer); window.removeEventListener("focus", focus); document.removeEventListener("visibilitychange", focus); };
   }, [authenticated, temporary, refresh]);
-  useEffect(() => {
-    window.scrollTo(0, 0);
-  }, [tab, authenticated]);
 
   async function signIn(event: FormEvent) {
     event.preventDefault();
-    setBusy(true);
-    setError("");
-    mutationInFlight.current = true;
-    ++version.current;
-    readController.current?.abort();
+    setBusy(true); setError(""); mutationInFlight.current = true; ++version.current; readController.current?.abort();
     try {
       await request("/api/session", "POST", { personaId: persona, password });
       setPassword("");
       applySnapshot(await request("/api/demo"));
       setNotice("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not sign in.");
-    } finally {
-      setBusy(false);
-      mutationInFlight.current = false;
-    }
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not sign in."); }
+    finally { setBusy(false); mutationInFlight.current = false; }
   }
   async function signOut() {
-    setBusy(true);
-    mutationInFlight.current = true;
-    ++version.current;
-    readController.current?.abort();
-    stopAudio();
-    setTemporary(false);
-    temporaryRef.current = false;
-    setTemporaryDone([]);
-    setModal(null);
+    setBusy(true); mutationInFlight.current = true; ++version.current; readController.current?.abort();
+    setTemporary(false); temporaryRef.current = false; setTemporaryDone([]); setModal(null);
     try {
       await request("/api/session", "DELETE");
-      setData(null);
-      setAuthenticated(false);
-      setPassword("");
-      setInvite(null);
-      setToken("");
-      setNotice("");
-      setError("");
-      setTab("today");
-    } catch {
-      setError("Could not sign out. Please try again.");
-    } finally {
-      setBusy(false);
-      mutationInFlight.current = false;
-    }
+      setData(null); setAuthenticated(false); setPassword(""); setInvite(null); setNotice(""); setError("");
+      setView(token ? "household" : "today");
+    } catch { setError("Could not sign out. Please try again."); }
+    finally { setBusy(false); mutationInFlight.current = false; }
   }
   async function mutate(payload: Record<string, unknown>, success: string) {
     if (mutationInFlight.current) return false;
-    mutationInFlight.current = true;
-    setBusy(true);
-    setError("");
-    setNotice("");
-    ++version.current;
-    readController.current?.abort();
+    mutationInFlight.current = true; setBusy(true); setError(""); setNotice(""); ++version.current; readController.current?.abort();
     try {
       const result = await request("/api/demo", "POST", payload);
       applySnapshot(result.snapshot);
-      if (result.invitation)
-        setInvite({
-          url: `${window.location.origin}/#invite=${result.invitation.token}`,
-          expiresAt: result.invitation.expiresAt,
-        });
+      if (result.invitation) setInvite({ url: `${window.location.origin}/#invite=${result.invitation.token}`, expiresAt: result.invitation.expiresAt });
       setNotice(success);
       return true;
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Could not save this change.",
-      );
-      try {
-        applySnapshot(await request("/api/demo"));
-      } catch {
-        setData(null);
-      }
+      setError(err instanceof Error ? err.message : "Could not save this change.");
+      try { applySnapshot(await request("/api/demo")); } catch { setData(null); }
       return false;
-    } finally {
-      mutationInFlight.current = false;
-      setBusy(false);
-    }
+    } finally { mutationInFlight.current = false; setBusy(false); }
   }
-  function navigate(next: Tab) {
-    setTab(next);
-    setNotice("");
-    setError("");
-    stopAudio();
-    window.history.replaceState(
-      null,
-      "",
-      next === "privacy" ? "#privacy" : window.location.pathname,
-    );
+  function navigate(next: View, target?: string, keepNotice = false) {
+    setView(next); if (!keepNotice) setNotice(""); setError("");
+    window.history.replaceState(null, "", target ? `#${target}` : window.location.pathname);
+    if (target) window.requestAnimationFrame(() => document.getElementById(target)?.scrollIntoView({ behavior: "smooth" }));
+    else window.scrollTo(0, 0);
     void refresh();
   }
   function beginTemporary() {
-    ++version.current;
-    readController.current?.abort();
-    temporaryRef.current = true;
-    setTemporary(true);
-    setTemporaryDone([]);
-    setModal(null);
-    setNotice("");
-    setError("");
-    stopAudio();
+    ++version.current; readController.current?.abort(); temporaryRef.current = true;
+    setTemporary(true); setTemporaryDone([]); setModal(null); setNotice(""); setError("");
   }
   function endTemporary() {
-    temporaryRef.current = false;
-    setTemporary(false);
-    setTemporaryDone([]);
-    setTab("me");
-    void refresh();
-  }
-  async function speak(cardId: string) {
-    if (speaking === cardId) {
-      stopAudio();
-      return;
-    }
-    stopAudio();
-    setSpeaking(cardId);
-    setError("");
-    requestedAudioCard.current = cardId;
-    const sequence = audioVersion.current;
-    try {
-      const res = await fetch("/api/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cardId }),
-        cache: "no-store",
-      });
-      if (!res.ok) {
-        const result = await res.json();
-        throw new Error(result.error);
-      }
-      const blob = await res.blob();
-      // A fresh access check also covers revocation while narration was generated.
-      await request(`/api/demo?cardId=${encodeURIComponent(cardId)}`);
-      if (sequence !== audioVersion.current || temporaryRef.current) return;
-      const url = URL.createObjectURL(blob);
-      const element = new Audio(url);
-      audio.current = { element, url, cardId };
-      element.onended = stopAudio;
-      element.onerror = () => {
-        stopAudio();
-        setError("Audio could not play. You can read the checklist below.");
-      };
-      await element.play();
-    } catch (err) {
-      if (sequence === audioVersion.current) {
-        stopAudio();
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Voice is unavailable. You can read the checklist below.",
-        );
-      }
-    }
+    temporaryRef.current = false; setTemporary(false); setTemporaryDone([]); setView("today"); void refresh();
   }
 
-  if (!ready)
-    return (
-      <div className="loading-screen">
-        <Brand />
-        <span className="spinner" />
-        <p>Opening your home…</p>
-      </div>
-    );
-  if (!authenticated)
-    return (
-      <div className="login-page">
-        <header className="topbar">
-          <Brand />
-          <span className="demo-badge">Fictitious data · Demo</span>
-        </header>
-        <main className="login-layout">
-          <section className="login-story">
-            <span className="eyebrow">A LITTLE CLOSER, ON YOUR TERMS</span>
-            <h1>
-              Your home.
-              <br />
-              Your people.
-              <br />
-              <span>Your choices.</span>
-            </h1>
-            <p>
-              Life changes. Make room for what comes next, with guidance that
-              starts with you.
-            </p>
-            <div className="login-art">
-              <HouseIllustration />
-            </div>
-            <div className="promise">
-              <Icon name="privacy" />
-              <span>The customer shares. KBC guides.</span>
-            </div>
-          </section>
-          <section className="login-panel">
-            <span className="eyebrow">WELCOME TO KBC HOME</span>
-            <h2>Step into the story</h2>
-            <p className="muted">
-              Choose a demo persona to explore a different point of view.
-            </p>
-            {token && (
-              <div className="notice">
-                An invitation is ready. Sign in as its intended recipient to
-                accept it.
-              </div>
-            )}
-            <form onSubmit={signIn}>
-              <fieldset>
-                <legend>Who would you like to be?</legend>
-                <div className="persona-list">
-                  {personas.map((p) => (
-                    <label
-                      key={p.id}
-                      className={`persona-option ${persona === p.id ? "selected" : ""}`}
-                    >
-                      <input
-                        type="radio"
-                        name="persona"
-                        value={p.id}
-                        checked={persona === p.id}
-                        onChange={() => setPersona(p.id)}
-                      />
-                      <Avatar id={p.id} name={p.name} />
-                      <span>
-                        <strong>{p.name}</strong>
-                        <small>{p.note}</small>
-                      </span>
-                      <span className="radio-dot" />
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
-              <label className="field-label" htmlFor="password">
-                Demo password
-              </label>
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="current-password"
-                required
-                placeholder="Enter the configured demo password"
-              />
-              {error && (
-                <div className="error" role="alert">
-                  {error}
-                </div>
-              )}
-              <button className="button primary full" disabled={busy}>
-                {busy
-                  ? "Signing in…"
-                  : `Continue as ${personas.find((p) => p.id === persona)?.name}`}
-                <Icon name="arrow" size={19} />
-              </button>
-            </form>
-            <div className="login-footnote">
-              <Icon name="lock" size={17} />
-              <p>
-                Persona switching is a demo mechanism, not production
-                authentication. All people and balances are fictitious.
-              </p>
-            </div>
-          </section>
-        </main>
-        <footer className="login-footer">
-          Thoughtful guidance. Shared on your terms.
-        </footer>
-      </div>
-    );
+  if (!ready) return <div className="loading-screen"><Brand/><span className="spinner"/><p>Opening your home…</p></div>;
+  if (!authenticated) return <div className="login-page">
+    <header className="topbar"><Brand/><span className="demo-badge">Demo · Fictitious data</span></header>
+    <main className="login-main"><div className="login-card">
+      <div className="welcome-icon"><Icon name="home" size={30}/></div>
+      <h1>Welcome to KBC Circle</h1>
+      <p>Choose a demo person to get started.</p>
+      {token && <div className="notice" role="status">An invitation is ready. Sign in as its intended recipient.</div>}
+      <form onSubmit={signIn}>
+        <fieldset><legend>Continue as</legend><div className="persona-list">{personas.map(p => <label key={p.id} className={`persona-option ${persona === p.id ? "selected" : ""}`}>
+          <input type="radio" name="persona" value={p.id} checked={persona === p.id} onChange={() => setPersona(p.id)}/>
+          <Avatar id={p.id} name={p.name}/><strong>{p.name}</strong><span className="radio-dot"/>
+        </label>)}</div></fieldset>
+        <label className="field-label" htmlFor="password">Demo password</label>
+        <input id="password" type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" required placeholder="Enter the demo password"/>
+        {error && <div className="error" role="alert">{error}</div>}
+        <button className="button primary full" disabled={busy}>{busy ? "Signing in…" : "Continue"}<Icon name="arrow" size={18}/></button>
+      </form>
+      <p className="login-note">A demonstration with fictitious people and balances. Persona switching is a demo mechanism.</p>
+    </div></main>
+  </div>;
 
-  return (
-    <div className="app">
-      <header className="topbar">
-        <Brand />
-        <div className="topbar-right">
-          <span className="demo-badge">Fictitious data · Demo</span>
-          <button
-            className="persona-switch"
-            onClick={signOut}
-            disabled={busy}
-            title="Sign out to switch demo persona"
-          >
-            {data && (
-              <Avatar id={data.customer.id} name={data.customer.name} small />
-            )}
-            <span>Switch persona</span>
-            <Icon name="logout" size={17} />
-          </button>
-        </div>
-      </header>
-      <main className="workspace" id="main-content">
-        {error && (
-          <div className="error" role="alert">
-            <Icon name="info" size={19} />
-            <span>{error}</span>
-            <button className="text-button" onClick={() => void refresh()}>
-              Refresh
-            </button>
-          </div>
-        )}
-        {notice && (
-          <div className="notice" role="status">
-            <Icon name="check" size={19} />
-            <span>{notice}</span>
-            <button
-              className="icon-button"
-              aria-label="Dismiss confirmation"
-              onClick={() => setNotice("")}
-            >
-              <Icon name="close" size={17} />
-            </button>
-          </div>
-        )}
-        {temporary ? (
-          <section className="temporary panel">
-            <span className="tag">JUST FOR THIS VISIT</span>
-            <h1>A little preparation goes a long way</h1>
-            <p>
-              This general checklist stays only in this page’s memory. No
-              moment, card, or analytics record is saved. It disappears when you
-              exit or sign out.
-            </p>
-            <div className="checklist">
-              {generalChecklist.map((text, i) => (
-                <label key={text}>
-                  <input
-                    type="checkbox"
-                    checked={temporaryDone.includes(i)}
-                    onChange={(e) =>
-                      setTemporaryDone((old) =>
-                        e.target.checked
-                          ? [...old, i]
-                          : old.filter((x) => x !== i),
-                      )
-                    }
-                  />
-                  <span>{text}</span>
-                </label>
-              ))}
-            </div>
-            <button className="button primary" onClick={endTemporary}>
-              Exit without saving
-              <Icon name="arrow" size={18} />
-            </button>
+  const inviteCandidate = data?.inviteCandidates.find(c => c.id === invitee) || data?.inviteCandidates[0];
+  return <div className={`app ${data?.settings.largeText ? "large-text" : ""}`}>
+    <header className="topbar"><Brand/><div className="topbar-actions"><span className="demo-badge">Demo · Fictitious data</span><button className="account-button" onClick={signOut} disabled={busy} aria-label={`Sign out as ${data?.customer.name || "demo customer"}`}>
+      {data && <Avatar id={data.customer.id} name={data.customer.name}/>}<span>{data?.customer.name}<small>Switch person</small></span>
+    </button></div></header>
+    <div className="app-shell"><aside className="side"><div className="side-person">{data && <Avatar id={data.customer.id} name={data.customer.name}/>}<span><strong>{data?.customer.name}</strong><small>Demo customer</small></span></div><nav aria-label="Main menu">{([ ["today", "Overview", "today"], ["money", "Money", "card"], ["moments", "Moments", "leaf"], ["household", "Circle", "home"], ["mykbc", "My KBC", "me"] ] as const).map(([name,label,icon]) => <button key={name} className={view === name ? "active" : ""} onClick={() => navigate(name)}><Icon name={icon} size={19}/>{label}</button>)}</nav></aside><main className="workspace" id="main-content">
+      {error && <div className="error" role="alert"><Icon name="info" size={18}/><span>{error}</span><button className="text-button" onClick={() => { setError(""); void refresh(); }}>Retry</button></div>}
+      {notice && <div className="notice" role="status"><Icon name="check" size={18}/><span>{notice}</span><button className="icon-button" aria-label="Dismiss confirmation" onClick={() => setNotice("")}><Icon name="close" size={16}/></button></div>}
+      {temporary ? <section className="panel temporary"><span className="eyebrow">PRIVATE PREVIEW</span><h1>A checklist for you</h1><p>This stays only on this page. Nothing is saved or shared.</p><div className="checklist">{generalChecklist.map((item, index) => <label key={item}><input type="checkbox" checked={temporaryDone.includes(index)} onChange={e => setTemporaryDone(old => e.target.checked ? [...old, index] : old.filter(i => i !== index))}/><span>{item}</span></label>)}</div><button className="button primary" onClick={endTemporary}>Done without saving</button></section> : !data ? <section className="panel empty"><Icon name="privacy" size={34}/><h2>Your information could not be refreshed</h2><p>We cleared the previous view. Try again to check your current access.</p><button className="button primary" onClick={() => void refresh()}>Try again</button></section> : <>
+        <nav className="bottomnav" aria-label="Main navigation">{([ ["today", "Overview", "today"], ["money", "Money", "card"], ["moments", "Moments", "leaf"], ["household", "Circle", "home"], ["mykbc", "My KBC", "me"] ] as const).map(([name,label,icon]) => <button key={name} className={view === name ? "active" : ""} onClick={() => navigate(name)}><Icon name={icon} size={19}/>{label}</button>)}</nav>
+        {view === "today" ? <>
+          <div className="page-heading"><h1>Good day, {data.customer.name}</h1><p>Your overview of what needs attention.</p></div>
+          <div className="top-stats"><button className="stat" onClick={() => navigate("money")}><span>In your accounts</span><b>{money(data.money.accounts.reduce((sum, account) => sum + account.balance, 0))}</b></button><button className="stat" onClick={() => navigate("moments")}><span>Active moments</span><b>{data.ownMoments.length}</b></button></div>
+          <div className="quick-actions"><button className="button primary" onClick={() => navigate("moments")}>Report a moment</button><button className="button secondary" onClick={() => navigate("mykbc")}>Plan a conversation</button></div>
+          <section className="guidance-list"><div className="section-heading"><h2>Needs your attention</h2>{data.cards.length > 0 && <span className="count">{data.cards.length}</span>}</div>
+            {data.settings.quietMode ? <p className="muted">Quiet mode is on. Guidance is available in Moments.</p> : data.cards.length ? data.cards.map(card => <GuidanceCard key={card.id} card={card} busy={busy} sharing={() => navigate("mykbc", "privacy")} mutate={mutate}/>) : <div className="panel empty"><Icon name="leaf" size={30}/><h3>Nothing to do right now</h3><p>Report a life moment, or wait for someone in your Circle to choose to share one with you.</p></div>}
           </section>
-        ) : !data ? (
-          <section className="empty panel">
-            <Icon name="privacy" size={36} />
-            <h2>Your information could not be refreshed</h2>
-            <p>
-              We have cleared the previous view. Refresh to check your current
-              access.
-            </p>
-            <button className="button primary" onClick={() => void refresh()}>
-              Try again
-            </button>
-          </section>
-        ) : (
-          <>
-            <div className="page-heading">
-              <div>
-                <span className="eyebrow">
-                  {tab === "today"
-                    ? `YOUR EVERYDAY, ${data.customer.name.toUpperCase()}`
-                    : "YOUR HOME, YOUR CHOICES"}
-                </span>
-                <h1>
-                  {tab === "today"
-                    ? `Good to see you, ${data.customer.name}`
-                    : tab === "home"
-                      ? "Better together. By choice."
-                      : tab === "me"
-                        ? "It starts with you."
-                        : "You decide what’s shared."}
-                </h1>
-                <p>
-                  {tab === "today"
-                    ? "A little guidance for the things that matter."
-                    : tab === "home"
-                      ? "Your people, with room for everyone’s privacy."
-                      : tab === "me"
-                        ? "Your information. Your moments. Your story to tell."
-                        : "A separate choice for each person and each kind of information."}
-                </p>
-              </div>
-              <span className="live-indicator">
-                <i />
-                Permissions checked live
-              </span>
-            </div>
-            {token && (
-              <section className="invite-banner">
-                <div className="round-icon">
-                  <Icon name="home" />
-                </div>
-                <div>
-                  <h3>You’ve been invited to a household</h3>
-                  <p>
-                    Joining shares your name and membership. Your balance and
-                    life moments stay private until you choose otherwise.
-                  </p>
-                </div>
-                <button
-                  className="button primary"
-                  disabled={busy}
-                  onClick={async () => {
-                    if (
-                      await mutate(
-                        { action: "accept", token },
-                        "You’re in. Choose what to share with each person below.",
-                      )
-                    ) {
-                      setToken("");
-                      setTab("privacy");
-                    }
-                  }}
-                >
-                  Accept invitation
-                </button>
-                <button
-                  className="icon-button"
-                  aria-label="Close invitation"
-                  onClick={() => setToken("")}
-                >
-                  <Icon name="close" />
-                </button>
-              </section>
-            )}
-            {tab === "today" && (
-              <>
-                <section className="hero">
-                  <div className="hero-copy">
-                    <span className="hero-label">
-                      <span /> HOME IS MORE THAN A PLACE
-                    </span>
-                    <h2>
-                      A new chapter.
-                      <br />A little guidance.
-                    </h2>
-                    <p>
-                      Tell us what’s changing. We’ll help you think through the
-                      next steps, at your pace.
-                    </p>
-                    <button
-                      className="button white"
-                      onClick={() => setModal("report")}
-                    >
-                      Share a life moment
-                      <Icon name="arrow" size={18} />
-                    </button>
-                  </div>
-                  <HouseIllustration />
-                </section>
-                <div className="content-grid">
-                  <section>
-                    <div className="section-heading">
-                      <h2>
-                        Here for your next step{" "}
-                        <span className="count">{data.cards.length}</span>
-                      </h2>
-                      <span className="muted small">
-                        Made clear. Made for you.
-                      </span>
-                    </div>
-                    {data.cards.length ? (
-                      <div className="cards">
-                        {data.cards.map((card) => (
-                          <GuidanceCard
-                            key={card.id}
-                            card={card}
-                            busy={busy}
-                            speaking={speaking === card.id}
-                            speak={() => void speak(card.id)}
-                            privacy={() => navigate("privacy")}
-                            mutate={mutate}
-                          />
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="panel empty">
-                        <span className="round-icon pale">
-                          <Icon name="leaf" size={29} />
-                        </span>
-                        <h3>A little space for what comes next</h3>
-                        <p>
-                          No guidance cards yet. Report a life moment, or
-                          receive one when someone chooses to share theirs with
-                          you.
-                        </p>
-                        <button
-                          className="text-button"
-                          onClick={() => setModal("report")}
-                        >
-                          Tell us what’s changing{" "}
-                          <Icon name="arrow" size={17} />
-                        </button>
-                      </div>
-                    )}
-                  </section>
-                  <aside>
-                    <section className="panel household-preview">
-                      <div className="section-heading">
-                        <h3>Your household</h3>
-                        <Icon name="home" />
-                      </div>
-                      <div className="avatar-stack">
-                        {data.household ? (
-                          data.household.members.map((m) => (
-                            <Avatar key={m.id} id={m.id} name={m.name} />
-                          ))
-                        ) : (
-                          <span className="round-icon pale">
-                            <Icon name="home" />
-                          </span>
-                        )}
-                      </div>
-                      <h3>
-                        {data.household
-                          ? data.household.members.map((m) => m.name).join(", ")
-                          : "A place for your people"}
-                      </h3>
-                      <p>
-                        {data.household
-                          ? "Together in one household. Each in control of their own information."
-                          : "Accept an invitation to form your household. Sharing is always your choice."}
-                      </p>
-                      <button
-                        className="text-button"
-                        onClick={() => navigate("home")}
-                      >
-                        Open Home
-                        <Icon name="arrow" size={17} />
-                      </button>
-                    </section>
-                    <section className="privacy-note">
-                      <Icon name="privacy" size={26} />
-                      <h3>
-                        Close to each other.
-                        <br />
-                        In control of your privacy.
-                      </h3>
-                      <p>
-                        Joining a household never automatically shares your
-                        balance or life moments.
-                      </p>
-                      <button
-                        className="text-button"
-                        onClick={() => navigate("privacy")}
-                      >
-                        Your sharing choices
-                        <Icon name="arrow" size={17} />
-                      </button>
-                    </section>
-                  </aside>
-                </div>
-              </>
-            )}
-            {tab === "home" && (
-              <div className="content-grid">
-                <section className="panel">
-                  <div className="section-heading">
-                    <h2>{data.household?.name || "Your household"}</h2>
-                    <span className="tag">
-                      {data.household
-                        ? `${data.household.members.length} MEMBERS`
-                        : "NOT JOINED"}
-                    </span>
-                  </div>
-                  {data.household ? (
-                    <>
-                      <p className="muted">
-                        Only information each person has allowed you to see
-                        appears here.
-                      </p>
-                      <div className="member-list">
-                        {data.household.members.map((m) => (
-                          <article className="member" key={m.id}>
-                            <div className="member-heading">
-                              <Avatar id={m.id} name={m.name} />
-                              <div>
-                                <h3>
-                                  {m.name}{" "}
-                                  {m.id === data.customer.id && (
-                                    <span className="muted small">(you)</span>
-                                  )}
-                                </h3>
-                                <span className="small muted">
-                                  {m.role === "founder"
-                                    ? "Household founder"
-                                    : "Household member"}
-                                </span>
-                              </div>
-                              {m.id !== data.customer.id && (
-                                <Icon name="privacy" size={19} />
-                              )}
-                            </div>
-                            {m.balance !== undefined && (
-                              <div className="balance">
-                                <span>
-                                  {m.id === data.customer.id
-                                    ? "Your synthetic balance"
-                                    : "Shared synthetic balance"}
-                                </span>
-                                <strong>{money(m.balance)}</strong>
-                              </div>
-                            )}
-                            {m.moments?.map((moment) => (
-                              <div className="shared-moment" key={moment.id}>
-                                <Icon name="leaf" size={18} />
-                                <div>
-                                  <strong>{moment.label}</strong>
-                                  <small>
-                                    Reported by {m.name} ·{" "}
-                                    {date(moment.createdAt)}
-                                  </small>
-                                </div>
-                              </div>
-                            ))}
-                            {m.id !== data.customer.id &&
-                              m.balance === undefined &&
-                              !m.moments?.length && (
-                                <p className="private-label">
-                                  <Icon name="lock" size={15} /> No private
-                                  information shared with you
-                                </p>
-                              )}
-                          </article>
-                        ))}
-                      </div>
-                      <div className="panel-footer">
-                        <p className="small muted">
-                          Leaving ends access to shared information in both
-                          directions.
-                        </p>
-                        <button
-                          className="text-button danger"
-                          onClick={() => setModal("leave")}
-                        >
-                          Leave household
-                          <Icon name="logout" size={17} />
-                        </button>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="empty">
-                      <Icon name="home" size={42} />
-                      <h3>Every household starts with an invitation</h3>
-                      <p>
-                        Open an invitation link, or paste it below. Only its
-                        intended recipient can accept it.
-                      </p>
-                      <InvitationInput setToken={setToken} />
-                    </div>
-                  )}
-                </section>
-                <aside>
-                  <section className="panel">
-                    <span className="round-icon pale">
-                      <Icon name="plus" />
-                    </span>
-                    <h3>Make room for someone</h3>
-                    <p>
-                      Invite a person to join. They decide whether to accept and
-                      what to share.
-                    </p>
-                    {data.household && data.inviteCandidates.length ? (
-                      <>
-                        <label className="field-label" htmlFor="invitee">
-                          Invite a demo customer
-                        </label>
-                        <select
-                          id="invitee"
-                          value={
-                            data.inviteCandidates.some((c) => c.id === invitee)
-                              ? invitee
-                              : data.inviteCandidates[0].id
-                          }
-                          onChange={(e) => setInvitee(e.target.value)}
-                        >
-                          {data.inviteCandidates.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.name}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          className="button primary full"
-                          disabled={busy}
-                          onClick={() =>
-                            void mutate(
-                              {
-                                action: "invite",
-                                householdId: data.household?.id,
-                                recipientId: data.inviteCandidates.some(
-                                  (c) => c.id === invitee,
-                                )
-                                  ? invitee
-                                  : data.inviteCandidates[0].id,
-                              },
-                              "Invitation created. Share the link with its intended recipient.",
-                            )
-                          }
-                        >
-                          Create invitation link
-                          <Icon name="plus" size={17} />
-                        </button>
-                      </>
-                    ) : (
-                      <p className="small muted">
-                        {data.household
-                          ? "All demo customers have joined a household."
-                          : "Join a household before inviting someone."}
-                      </p>
-                    )}
-                    {invite && (
-                      <div className="invitation-result">
-                        <label className="field-label" htmlFor="invite-url">
-                          Invitation link
-                        </label>
-                        <input
-                          id="invite-url"
-                          readOnly
-                          value={invite.url}
-                          onFocus={(e) => e.target.select()}
-                        />
-                        <small>
-                          Single use · Expires {date(invite.expiresAt)}
-                        </small>
-                        <button
-                          className="button secondary full"
-                          onClick={async () => {
-                            try {
-                              await navigator.clipboard.writeText(invite.url);
-                              setNotice("Invitation link copied.");
-                            } catch {
-                              setError(
-                                "Copy is unavailable. Select the invitation link and copy it manually.",
-                              );
-                            }
-                          }}
-                        >
-                          <Icon name="copy" size={17} />
-                          Copy link
-                        </button>
-                      </div>
-                    )}
-                  </section>
-                  <section className="privacy-note">
-                    <Icon name="lock" />
-                    <h3>Being a member isn’t permission</h3>
-                    <p>
-                      A household connects people. Sharing choices control
-                      access, one person and one category at a time.
-                    </p>
-                  </section>
-                </aside>
-              </div>
-            )}
-            {tab === "me" && (
-              <div className="content-grid">
-                <section>
-                  <div className="panel profile">
-                    <Avatar id={data.customer.id} name={data.customer.name} />
-                    <div>
-                      <span className="eyebrow">YOUR DEMO PROFILE</span>
-                      <h2>{data.customer.name}</h2>
-                      <p>
-                        {data.customer.profile.occupation} ·{" "}
-                        {data.customer.profile.age} years old ·{" "}
-                        {data.customer.profile.city}
-                      </p>
-                    </div>
-                  </div>
-                  <section className="panel sources">
-                    <h2>Where your information comes from</h2>
-                    <div className="source-row">
-                      <span className="round-icon pale">
-                        <Icon name="me" />
-                      </span>
-                      <div>
-                        <h3>Demo profile and balance</h3>
-                        <p>
-                          Seeded fictitious information. No banking connection.
-                        </p>
-                        <strong>{money(data.customer.profile.balance)}</strong>
-                      </div>
-                      <span className="tag">SYNTHETIC</span>
-                    </div>
-                    <div className="source-row">
-                      <span className="round-icon peach">
-                        <Icon name="leaf" />
-                      </span>
-                      <div>
-                        <h3>Life moments</h3>
-                        <p>
-                          Only what you explicitly tell us. Never inferred from
-                          your transactions.
-                        </p>
-                        {data.ownMoments.length ? (
-                          data.ownMoments.map((m) => (
-                            <p key={m.id}>
-                              <strong>{m.label}</strong>
-                              <br />
-                              <small>
-                                Reported by you · {date(m.createdAt)}
-                              </small>
-                            </p>
-                          ))
-                        ) : (
-                          <small>No life moments reported yet.</small>
-                        )}
-                      </div>
-                    </div>
-                    <div className="source-row">
-                      <span className="round-icon pale">
-                        <Icon name="privacy" />
-                      </span>
-                      <div>
-                        <h3>Your sharing choices</h3>
-                        <p>
-                          Explicit permission, recorded separately for each
-                          recipient and category.
-                        </p>
-                        <button
-                          className="text-button"
-                          onClick={() => navigate("privacy")}
-                        >
-                          View consent history
-                          <Icon name="arrow" size={17} />
-                        </button>
-                      </div>
-                    </div>
-                  </section>
-                </section>
-                <aside>
-                  <section className="panel moment-prompt">
-                    <span className="round-icon peach">
-                      <Icon name="leaf" />
-                    </span>
-                    <span className="eyebrow">SOMETHING CHANGING?</span>
-                    <h2>A new chapter starts with you.</h2>
-                    <p>
-                      Tell us about a parent moving in. Get a practical
-                      checklist to help with the conversation.
-                    </p>
-                    <button
-                      className="button primary full"
-                      onClick={() => setModal("report")}
-                    >
-                      Report a life moment
-                      <Icon name="plus" size={18} />
-                    </button>
-                  </section>
-                  <section className="panel demo-controls">
-                    <h3>Demo controls</h3>
-                    <p className="small muted">
-                      Restart the shared story for all demo sessions. Sofie and
-                      Tom remain the initial household.
-                    </p>
-                    <button
-                      className="text-button"
-                      onClick={() => setModal("reset")}
-                    >
-                      Reset demo data
-                    </button>
-                    <button
-                      className="text-button"
-                      onClick={signOut}
-                      disabled={busy}
-                    >
-                      Sign out
-                      <Icon name="logout" size={17} />
-                    </button>
-                  </section>
-                </aside>
-              </div>
-            )}
-            {tab === "privacy" && (
-              <div className="content-grid">
-                <section>
-                  <div className="privacy-intro">
-                    <Icon name="privacy" size={27} />
-                    <p>
-                      Share a little, or a little more. You can change your mind
-                      at any time. All switches start off.
-                    </p>
-                  </div>
-                  {data.sharing.length ? (
-                    data.sharing.map((peer) => (
-                      <section
-                        className="panel sharing-panel"
-                        key={peer.recipientId}
-                      >
-                        <div className="member-heading">
-                          <Avatar
-                            id={peer.recipientId}
-                            name={peer.recipientName}
-                          />
-                          <div>
-                            <h2>What {peer.recipientName} can see</h2>
-                            <p className="small muted">
-                              Your information, shared with {peer.recipientName}{" "}
-                              only
-                            </p>
-                          </div>
-                        </div>
-                        {(["balance", "moments"] as Category[]).map(
-                          (category) => (
-                            <div className="sharing-row" key={category}>
-                              <div>
-                                <h3>
-                                  {category === "balance"
-                                    ? "Balance"
-                                    : "Life moments"}
-                                </h3>
-                                <p>
-                                  {category === "balance"
-                                    ? "Your current synthetic account balance."
-                                    : "Your reported moments and the guidance they enable."}
-                                </p>
-                              </div>
-                              <button
-                                className="switch"
-                                role="switch"
-                                aria-checked={peer[category]}
-                                aria-label={`Share ${category === "moments" ? "life moments" : "balance"} with ${peer.recipientName}`}
-                                disabled={busy}
-                                onClick={() =>
-                                  void mutate(
-                                    {
-                                      action: "consent",
-                                      subjectId: data.customer.id,
-                                      recipientId: peer.recipientId,
-                                      category,
-                                      granted: !peer[category],
-                                    },
-                                    `${category === "balance" ? "Balance" : "Life moments"} sharing with ${peer.recipientName} is now ${peer[category] ? "off" : "on"}.`,
-                                  )
-                                }
-                              >
-                                <span />
-                              </button>
-                            </div>
-                          ),
-                        )}
-                      </section>
-                    ))
-                  ) : (
-                    <section className="panel empty">
-                      <Icon name="lock" size={34} />
-                      <h3>Your information stays with you</h3>
-                      <p>
-                        Join a household to choose sharing permissions for each
-                        person.
-                      </p>
-                      <button
-                        className="text-button"
-                        onClick={() => navigate("home")}
-                      >
-                        Open Home
-                        <Icon name="arrow" size={17} />
-                      </button>
-                    </section>
-                  )}
-                  <p className="small muted privacy-disclaimer">
-                    Turning sharing off prevents future reads immediately. Open
-                    screens update on their next refresh, roughly every two
-                    seconds. Information already seen cannot be recalled. No
-                    notification is sent when you switch sharing off.
-                  </p>
-                </section>
-                <aside>
-                  <section className="panel history">
-                    <div className="section-heading">
-                      <h3>Your consent history</h3>
-                      <Icon name="today" size={20} />
-                    </div>
-                    <p className="small muted">
-                      A record of your choices, newest first.
-                    </p>
-                    {data.consentHistory.length ? (
-                      <ol>
-                        {data.consentHistory.map((event) => (
-                          <li key={event.id}>
-                            <span
-                              className={`history-dot ${event.granted ? "granted" : ""}`}
-                            />
-                            <strong>
-                              {event.category === "balance"
-                                ? "Balance"
-                                : "Life moments"}{" "}
-                              · {event.granted ? "Allowed" : "Stopped"}
-                            </strong>
-                            <p>
-                              With {event.recipientName}
-                              {event.reason === "household departure"
-                                ? " · Household departure"
-                                : ""}
-                            </p>
-                            <time dateTime={event.timestamp}>
-                              {date(event.timestamp)} · #{event.sequence}
-                            </time>
-                          </li>
-                        ))}
-                      </ol>
-                    ) : (
-                      <div className="history-empty">
-                        <Icon name="privacy" size={26} />
-                        <p>
-                          No sharing choices yet.
-                          <br />
-                          Nothing is shared by default.
-                        </p>
-                      </div>
-                    )}
-                  </section>
-                  <section className="privacy-note">
-                    <h3>Two independent choices</h3>
-                    <p>
-                      Sharing a life moment does not share your balance.
-                      Switching off your balance does not remove permitted
-                      moment guidance.
-                    </p>
-                  </section>
-                </aside>
-              </div>
-            )}
-          </>
-        )}
-        <footer className="app-footer">
-          <Icon name="privacy" size={16} />
-          <span>
-            A demonstration with fictitious data. General checklists, not
-            financial advice.
-          </span>
-          <span className="footer-brand">The customer shares. KBC guides.</span>
-        </footer>
-      </main>
-      {!temporary && (
-        <nav className="bottom-nav" aria-label="Main navigation">
-          {(["today", "home", "me", "privacy"] as Tab[]).map((item) => (
-            <button
-              key={item}
-              aria-current={tab === item ? "page" : undefined}
-              className={tab === item ? "active" : ""}
-              onClick={() => navigate(item)}
-            >
-              <Icon name={item} />
-              <span>{item.charAt(0).toUpperCase() + item.slice(1)}</span>
-              {item === "today" && !!data?.cards.length && <i />}
-            </button>
-          ))}
-        </nav>
-      )}
-      {modal === "report" && (
-        <Modal title="Tell us what’s changing" close={() => setModal(null)}>
-          <span className="round-icon peach">
-            <Icon name="leaf" size={28} />
-          </span>
-          <h3 className="moment-statement">“I am moving in with my son.”</h3>
-          <p>
-            Save this moment to receive a practical checklist. It will be
-            visible only to you and household members you have explicitly
-            allowed to see your life moments.
-          </p>
-          <div className="save-recipients">
-            <Icon name="privacy" size={18} />
-            <span>
-              {data?.sharing.some((p) => p.moments)
-                ? `Currently shared with: ${data.sharing
-                    .filter((p) => p.moments)
-                    .map((p) => p.recipientName)
-                    .join(", ")}.`
-                : "Currently only you can see this moment."}
-            </span>
-          </div>
-          <button
-            className="button primary full"
-            disabled={busy}
-            onClick={async () => {
-              if (
-                await mutate(
-                  { action: "report" },
-                  "Your moment is saved. Your guidance is ready.",
-                )
-              ) {
-                setModal(null);
-                setTab("today");
-              }
-            }}
-          >
-            {busy ? "Saving…" : "Save moment and see guidance"}
-            <Icon name="arrow" size={17} />
-          </button>
-          <button
-            className="button secondary full"
-            onClick={beginTemporary}
-            disabled={busy}
-          >
-            Continue without saving
-          </button>
-          <p className="small muted">
-            Without saving, you get a general checklist in temporary page
-            memory. It is never shared and clears when you exit.
-          </p>
-        </Modal>
-      )}
-      {modal === "leave" && (
-        <Modal title="Leave this household?" close={() => setModal(null)}>
-          <p>
-            Your balance and moments will no longer be available to household
-            members. You will lose access to their shared information too. Your
-            own data and consent history remain available to you.
-          </p>
-          <p className="small muted">
-            Joining again requires a new invitation and fresh sharing choices.
-          </p>
-          <button
-            className="button danger-button full"
-            disabled={busy}
-            onClick={async () => {
-              if (
-                await mutate(
-                  { action: "leave", householdId: data?.household?.id },
-                  "You have left the household. Household sharing has ended.",
-                )
-              ) {
-                setModal(null);
-                setInvite(null);
-              }
-            }}
-          >
-            Leave household
-          </button>
-          <button
-            className="button secondary full"
-            onClick={() => setModal(null)}
-          >
-            Stay in household
-          </button>
-        </Modal>
-      )}
-      {modal === "reset" && (
-        <Modal title="Restart the demo story?" close={() => setModal(null)}>
-          <p>
-            This resets all synthetic households, invitations, sharing choices,
-            moments and cards in every open demo session. It restores Sofie and
-            Tom’s initial household.
-          </p>
-          <button
-            className="button primary full"
-            disabled={busy}
-            onClick={async () => {
-              if (
-                await mutate(
-                  { action: "reset" },
-                  "The demo story is ready to start again.",
-                )
-              ) {
-                setModal(null);
-                setInvite(null);
-                setToken("");
-                setTab("today");
-              }
-            }}
-          >
-            Reset demo data
-          </button>
-          <button
-            className="button secondary full"
-            onClick={() => setModal(null)}
-          >
-            Cancel
-          </button>
-        </Modal>
-      )}
-    </div>
-  );
+        </> : view === "money" ? <MoneyScreen data={data} busy={busy} mutate={mutate}/> : view === "moments" ? <MomentsScreen data={data} busy={busy} mutate={mutate} beginTemporary={beginTemporary}/> : view === "mykbc" ? <MyKbcScreen data={data} busy={busy} mutate={mutate} setModal={setModal}/> : <>
+          <div className="page-heading"><h1>Circle</h1><p>{data.household ? `${data.household.name}. You choose what each member can see.` : "Join a Circle by accepting an invitation."}</p></div>
+          {token && <section className="panel invitation-banner"><div><h2>You’ve been invited</h2><p>Joining shares your name. Your balance and life moments stay private until you choose otherwise.</p></div><button className="button primary" disabled={busy} onClick={async () => { if (await mutate({ action: "accept", token }, "You’ve joined. Choose what to share below.")) { setToken(""); navigate("household", "sharing", true); } }}>Join household</button><button className="icon-button" aria-label="Dismiss invitation" onClick={() => setToken("")}><Icon name="close" size={18}/></button></section>}
+          {!data.household ? <section className="panel empty"><Icon name="home" size={34}/><h2>No Circle yet</h2><p>Open the invitation sent to you, or paste it here.</p><InvitationInput setToken={setToken}/></section> : <>
+            <CircleMap data={data}/>
+            <section className="panel members-panel"><div className="section-heading"><h2>Members</h2><span className="count">{data.household.members.length}</span></div><div className="member-list">{data.household.members.map(member => <div className="member" key={member.id}><Avatar id={member.id} name={member.name}/><div className="member-main"><strong>{member.name}{member.id === data.customer.id ? " (you)" : ""}</strong>{member.balance !== undefined && <p><span>{member.id === data.customer.id ? "Your balance" : "Shared balance"}</span><b>{money(member.balance)}</b></p>}{member.moments?.map(moment => <p key={moment.id}><Icon name="leaf" size={15}/><span>{moment.label}</span></p>)}{member.id !== data.customer.id && member.balance === undefined && !member.moments?.length && <small>Nothing private shared with you</small>}</div></div>)}</div></section>
+            {data.inviteCandidates.length > 0 && <section className="panel invite-panel"><div className="section-heading"><div><h2>Invite someone</h2><p>They decide whether to join and what to share.</p></div></div>{data.inviteCandidates.length > 1 && <><label className="field-label" htmlFor="invitee">Who would you like to invite?</label><select id="invitee" value={inviteCandidate?.id} onChange={e => setInvitee(e.target.value)}>{data.inviteCandidates.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></>}<button className="button secondary" disabled={busy} onClick={() => void mutate({ action: "invite", householdId: data.household?.id, recipientId: inviteCandidate?.id }, `Invitation for ${inviteCandidate?.name} is ready.`)}>Invite {inviteCandidate?.name}<Icon name="plus" size={17}/></button>{invite && <div className="invitation-result"><label className="field-label" htmlFor="invite-url">Invitation link · expires {date(invite.expiresAt)}</label><input id="invite-url" readOnly value={invite.url} onFocus={e => e.target.select()}/><button className="button secondary" onClick={async () => { try { await navigator.clipboard.writeText(invite.url); setNotice("Invitation link copied."); } catch { setError("Copy is unavailable. Select the link and copy it manually."); } }}><Icon name="copy" size={17}/>Copy link</button></div>}</section>}
+            <div className="quick-actions"><button className="button secondary" onClick={() => navigate("mykbc", "privacy")}>What I share</button><button className="text-button danger" onClick={() => setModal("leave")}>Leave Circle</button></div>
+          </>}
+        </>}
+      </>}
+      <footer className="app-footer">A demonstration with fictitious data. General checklists, not financial advice.</footer>
+    </main></div>
+    {modal === "report" && <Modal title="Tell us what’s changing" close={() => setModal(null)}><h3>“I am moving in with my son.”</h3><p>Save this moment to get a checklist. It stays private unless you’ve allowed someone in your household to see life moments.</p><p className="permission-note">{data?.sharing.some(peer => peer.moments) ? `Currently shared with ${data.sharing.filter(peer => peer.moments).map(peer => peer.recipientName).join(", ")}.` : "Currently only you can see this moment."}</p><button className="button primary full" disabled={busy} onClick={async () => { if (await mutate({ action: "report" }, "Your guidance is ready.")) { setModal(null); navigate("today", undefined, true); } }}>Save and see guidance</button><button className="button secondary full" onClick={beginTemporary} disabled={busy}>Continue without saving</button></Modal>}
+    {modal === "leave" && <Modal title="Leave this household?" close={() => setModal(null)}><p>You and the other members will lose access to each other’s shared information. Your own data remains yours.</p><button className="button danger-button full" disabled={busy} onClick={async () => { if (await mutate({ action: "leave", householdId: data?.household?.id }, "You’ve left the household.")) { setModal(null); setInvite(null); } }}>Leave household</button><button className="button secondary full" onClick={() => setModal(null)}>Stay</button></Modal>}
+    {modal === "reset" && <Modal title="Reset the demo?" close={() => setModal(null)}><p>This starts the synthetic story again for every open demo session. Sofie and Tom will be in the household.</p><button className="button danger-button full" disabled={busy} onClick={async () => { if (await mutate({ action: "reset" }, "The demo is ready to start again.")) { setModal(null); setInvite(null); setToken(""); navigate("today", undefined, true); } }}>Reset demo data</button><button className="button secondary full" onClick={() => setModal(null)}>Cancel</button></Modal>}
+  </div>;
 }
 
 function InvitationInput({ setToken }: { setToken: (token: string) => void }) {
   const [value, setValue] = useState("");
-  return (
-    <form
-      className="invitation-input"
-      onSubmit={(e) => {
-        e.preventDefault();
-        const match = value.match(/[#&]invite=([^&]+)/);
-        setToken(match ? match[1] : value.trim());
-        setValue("");
-      }}
-    >
-      <label className="field-label" htmlFor="paste-invite">
-        Invitation link or token
-      </label>
-      <input
-        id="paste-invite"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        required
-        placeholder="Paste your invitation here"
-      />
-      <button className="button secondary full" disabled={!value.trim()}>
-        Open invitation
-        <Icon name="arrow" size={17} />
-      </button>
-    </form>
-  );
+  return <form className="invitation-input" onSubmit={event => { event.preventDefault(); const match = value.match(/[#&]invite=([^&]+)/); setToken(match ? match[1] : value.trim()); setValue(""); }}><label className="field-label" htmlFor="paste-invite">Invitation link or token</label><input id="paste-invite" value={value} onChange={event => setValue(event.target.value)} required placeholder="Paste your invitation"/><button className="button primary" disabled={!value.trim()}>Open invitation</button></form>;
 }
 
-function GuidanceCard({
-  card,
-  busy,
-  speaking,
-  speak,
-  privacy,
-  mutate,
-}: {
-  card: CardView;
-  busy: boolean;
-  speaking: boolean;
-  speak: () => void;
-  privacy: () => void;
-  mutate: (
-    payload: Record<string, unknown>,
-    success: string,
-  ) => Promise<boolean>;
-}) {
-  return (
-    <article className="panel guidance-card">
-      <div className="card-top">
-        <span className={`tag ${card.kind === "personal" ? "tag-peach" : ""}`}>
-          {card.kind === "personal" ? "YOUR LIFE MOMENT" : "SHARED WITH YOU"}
-        </span>
-        <button
-          className="icon-button"
-          aria-label="Dismiss guidance card"
-          disabled={busy}
-          onClick={() =>
-            void mutate(
-              { action: "dismiss", cardId: card.id },
-              "Guidance card dismissed for you.",
-            )
-          }
-        >
-          <Icon name="close" size={18} />
-        </button>
-      </div>
-      <h2>{card.title}</h2>
-      <p>{card.body}</p>
-      <div className="checklist">
-        {card.checklist.map((item) => (
-          <label key={item.id}>
-            <input
-              type="checkbox"
-              checked={item.done}
-              disabled={busy}
-              onChange={(e) =>
-                void mutate(
-                  {
-                    action: "check",
-                    cardId: card.id,
-                    itemId: item.id,
-                    done: e.target.checked,
-                  },
-                  "Checklist updated.",
-                )
-              }
-            />
-            <span>{item.text}</span>
-          </label>
-        ))}
-      </div>
-      <div className="card-bottom">
-        <span className="small muted">
-          {card.checklist.filter((c) => c.done).length} of{" "}
-          {card.checklist.length} steps checked
-        </span>
-        <button className="text-button" onClick={speak}>
-          <Icon name="voice" size={17} />
-          {speaking ? "Stop audio" : "Listen"}
-        </button>
-      </div>
-      <details className="explanation">
-        <summary>
-          <Icon name="info" size={17} />
-          Why am I seeing this?<span>+</span>
-        </summary>
-        <div>
-          <strong>{card.explanation.source}</strong>
-          <p>{card.explanation.rule}</p>
-          <span className="rule-id">Rule: {card.explanation.ruleId}</span>
-          <p>{card.explanation.permission}</p>
-          <a
-            href={card.explanation.privacyHref}
-            onClick={(e) => {
-              e.preventDefault();
-              privacy();
-            }}
-          >
-            Open privacy settings <Icon name="arrow" size={16} />
-          </a>
-        </div>
-      </details>
-    </article>
-  );
+function CircleMap({ data }: { data: Snapshot }) {
+  const peers = data.household?.members.filter((person) => person.id !== data.customer.id) ?? [];
+  return <div className="panel circle-map" aria-label="Your Circle and your sharing choices"><div className="circle-ring"/><div className="circle-self"><Avatar id={data.customer.id} name={data.customer.name}/><strong>You</strong></div>{peers.map((person, index) => { const choice = data.sharing.find((item) => item.recipientId === person.id); const count = Number(choice?.balance) + Number(choice?.moments); return <div className={`circle-peer circle-peer-${index % 4}`} key={person.id}><Avatar id={person.id} name={person.name}/><strong>{person.name}</strong><small>{count} shared</small></div>; })}<p>Your choices are shown per person.</p></div>;
+}
+
+function GuidanceCard({ card, busy, sharing, mutate }: { card: CardView; busy: boolean; sharing: () => void; mutate: (payload: Record<string, unknown>, success: string) => Promise<boolean> }) {
+  return <article className="panel guidance-card"><div className="card-top"><span className="eyebrow">{card.kind === "personal" ? "YOUR MOMENT" : "SHARED WITH YOU"}</span><button className="icon-button" aria-label="Dismiss guidance card" disabled={busy} onClick={() => void mutate({ action: "dismiss", cardId: card.id }, "Guidance card dismissed.")}><Icon name="close" size={18}/></button></div><h3>{card.title}</h3><p>{card.body}</p><div className="checklist">{card.checklist.map(item => <label key={item.id}><input type="checkbox" checked={item.done} disabled={busy} onChange={event => void mutate({ action: "check", cardId: card.id, itemId: item.id, done: event.target.checked }, "Checklist updated.")}/><span>{item.text}</span></label>)}</div><details className="explanation"><summary>Why am I seeing this?<Icon name="plus" size={18}/></summary><div><strong>{card.explanation.source}</strong><p>{card.explanation.rule}</p><span className="rule-id">Rule: {card.explanation.ruleId}</span><p>{card.explanation.permission}</p><a href={card.explanation.privacyHref} onClick={event => { event.preventDefault(); sharing(); }}>View sharing settings <Icon name="arrow" size={16}/></a></div></details></article>;
+}
+
+function MoneyScreen({ data, busy, mutate }: { data: Snapshot; busy: boolean; mutate: (payload: Record<string, unknown>, success: string) => Promise<boolean> }) {
+  const [section, setSection] = useState<"accounts" | "budget" | "goals" | "simulate">("accounts");
+  const [accountId, setAccountId] = useState<string | null>(null);
+  const [category, setCategory] = useState("Groceries");
+  const [limit, setLimit] = useState("450");
+  const [goalName, setGoalName] = useState("");
+  const [goalTarget, setGoalTarget] = useState("");
+  const [monthly, setMonthly] = useState("100");
+  const [years, setYears] = useState("5");
+  const account = data.money.accounts.find((item) => item.id === accountId);
+  return <><div className="page-heading"><h1>Money</h1></div><nav className="subnav" aria-label="Money sections">{([ ["accounts", "Accounts"], ["budget", "Budget"], ["goals", "Goals"], ["simulate", "Simulate"] ] as const).map(([id,label]) => <button key={id} className={section === id ? "on" : ""} onClick={() => { setSection(id); setAccountId(null); }}>{label}</button>)}</nav>
+    {section === "accounts" && (account ? <><button className="back" onClick={() => setAccountId(null)}>‹ Back to accounts</button><h2>{account.name}</h2><p className="muted">{account.iban}</p><p className="big-amount">{money(account.balance)}</p><h2>Activity</h2><div className="panel list-panel">{account.transactions.length ? account.transactions.map((tx) => <div className="data-row" key={tx.id}><span><strong>{tx.label}</strong><small>{tx.date} · {tx.category}</small></span><b>{money(tx.amount)}</b></div>) : <p>No demo activity yet.</p>}</div></> : <><p className="muted">Total {money(data.money.accounts.reduce((sum, item) => sum + item.balance, 0))}</p><div className="panel list-panel">{data.money.accounts.map((item) => <button className="data-row" key={item.id} onClick={() => setAccountId(item.id)}><span><strong>{item.name}</strong><small>{item.iban}</small></span><b>{money(item.balance)}</b></button>)}</div><p className="small muted">Synthetic accounts only. No transfers or real banking connection.</p></>)}
+    {section === "budget" && <><p className="muted">You set the limits for your synthetic spending.</p><div className="panel">{data.money.budgets.length ? data.money.budgets.map((item) => <div className="budget-item" key={item.category}><div className="data-row"><strong>{item.category}</strong><span>{money(item.spent)} of {money(item.limit)}</span></div><div className="progress"><span style={{ width: `${Math.min(100, item.limit ? item.spent / item.limit * 100 : 0)}%` }}/></div></div>) : <p>No budgets yet.</p>}</div><form className="panel form-panel" onSubmit={(event) => { event.preventDefault(); void mutate({ action: "budget", category, limit: Number(limit) }, "Budget saved."); }}><h3>Set a demo budget</h3><label htmlFor="budget-cat">Category</label><input id="budget-cat" value={category} onChange={(event) => setCategory(event.target.value)} maxLength={30} required/><label htmlFor="budget-limit">Monthly limit (€)</label><input id="budget-limit" type="number" min="0" max="100000" step="0.01" value={limit} onChange={(event) => setLimit(event.target.value)} required/><button className="button primary" disabled={busy}>Save budget</button></form></>}
+    {section === "goals" && <><p className="muted">Personal ideas with fictitious amounts.</p>{data.money.goals.map((goal) => <div className="panel" key={goal.id}><h3>{goal.name}</h3><p>{money(goal.saved)} of {money(goal.target)}</p><div className="progress"><span style={{ width: `${Math.min(100, goal.saved / goal.target * 100)}%` }}/></div></div>)}<form className="panel form-panel" onSubmit={async (event) => { event.preventDefault(); if (await mutate({ action: "goal", name: goalName, target: Number(goalTarget) }, "Goal created.")) { setGoalName(""); setGoalTarget(""); } }}><h3>New demo goal</h3><label htmlFor="goal-name">Name</label><input id="goal-name" value={goalName} onChange={(event) => setGoalName(event.target.value)} maxLength={40} required/><label htmlFor="goal-target">Target (€)</label><input id="goal-target" type="number" min="1" max="1000000" step="0.01" value={goalTarget} onChange={(event) => setGoalTarget(event.target.value)} required/><button className="button primary" disabled={busy}>Create goal</button></form></>}
+    {section === "simulate" && <><p className="muted">Illustrative arithmetic. No result is saved, and this is not financial advice.</p><div className="panel form-panel"><h3>Simple savings illustration</h3><label htmlFor="sim-monthly">Monthly amount (€)</label><input id="sim-monthly" type="number" min="0" max="100000" value={monthly} onChange={(event) => setMonthly(event.target.value)}/><label htmlFor="sim-years">Years</label><input id="sim-years" type="number" min="1" max="50" value={years} onChange={(event) => setYears(event.target.value)}/><p className="big-amount">{money(Math.max(0, Number(monthly) || 0) * 12 * Math.max(0, Number(years) || 0))}</p><p className="small muted">Total contributions only: amount × 12 × years. No return is assumed.</p></div></>}
+  </>;
+}
+
+function MomentsScreen({ data, busy, mutate, beginTemporary }: { data: Snapshot; busy: boolean; mutate: (payload: Record<string, unknown>, success: string) => Promise<boolean>; beginTemporary: () => void }) {
+  const [mode, setMode] = useState<"list" | "catalog" | "preview">("list");
+  const [selected, setSelected] = useState<MomentType>("parent_moves_in");
+  const groups = [...new Set(momentTypes.map((type) => momentCatalog[type].group))];
+  const active = momentCatalog[selected];
+  if (mode === "catalog") return <><button className="back" onClick={() => setMode("list")}>‹ Back to Moments</button><h1>What is changing?</h1><p className="muted">KBC never guesses these moments. You decide what to tell us.</p>{groups.map((group) => <section key={group}><h2>{group}</h2><div className="options-grid">{momentTypes.filter((type) => momentCatalog[type].group === group).map((type) => <button className="option" key={type} onClick={() => { setSelected(type); setMode("preview"); }}>{momentCatalog[type].label}{momentCatalog[type].sensitive && <span className="chip">Private</span>}</button>)}</div></section>)}</>;
+  if (mode === "preview") return <><button className="back" onClick={() => setMode("catalog")}>‹ Back to moments</button><h1>{active.label}</h1><p className="muted">A fixed, general checklist based only on what you report.</p><div className="panel"><h3>Your steps</h3><ol className="preview-steps">{active.steps.map((step) => <li key={step}>{step}</li>)}</ol><p className="small muted">{active.sensitive ? "This sensitive moment always stays private in the demo." : data.sharing.some((person) => person.moments) ? `Life moments are currently shared with ${data.sharing.filter((person) => person.moments).map((person) => person.recipientName).join(", ")}.` : "Only you can see this moment unless you grant sharing."}</p><div className="actions"><button className="button primary" disabled={busy} onClick={async () => { if (await mutate({ action: "report", type: selected }, "Your guidance is ready.")) setMode("list"); }}>Save and see steps</button><button className="button secondary" onClick={beginTemporary}>Continue without saving</button></div></div></>;
+  return <><h1>Moments</h1><p className="muted page-intro">Tell us what changes in your life. KBC puts practical steps in one place and never infers a moment from transactions.</p><button className="button primary" onClick={() => setMode("catalog")}>New moment</button><h2>Ongoing</h2>{data.cards.length ? data.cards.map((card) => <GuidanceCard key={card.id} card={card} busy={busy} sharing={() => { window.location.hash = "privacy"; }} mutate={mutate}/>) : <p className="muted">No ongoing moments.</p>}{data.household?.members.some((person) => person.id !== data.customer.id && person.moments?.length) && <><h2>Shared in your Circle</h2><div className="panel list-panel">{data.household.members.filter((person) => person.id !== data.customer.id).flatMap((person) => person.moments?.map((moment) => <div className="data-row" key={moment.id}><strong>{person.name}</strong><span>{moment.label}</span></div>) ?? [])}</div></>}</>;
+}
+
+function MyKbcScreen({ data, busy, mutate, setModal }: { data: Snapshot; busy: boolean; mutate: (payload: Record<string, unknown>, success: string) => Promise<boolean>; setModal: (value: ModalName) => void }) {
+  const [section, setSection] = useState<"hub" | "profile" | "privacy" | "products" | "appointments" | "settings" | "log">(() => typeof window !== "undefined" && window.location.hash === "#privacy" ? "privacy" : "hub");
+  const [booking, setBooking] = useState(false);
+  const [topic, setTopic] = useState("General question");
+  const [channel, setChannel] = useState("In branch");
+  const [when, setWhen] = useState("");
+  const nav = [ ["profile", "Profile", "What KBC knows about you and where it comes from"], ["privacy", "Privacy and sharing", "What you share, and with whom"], ["products", "Products", "Your synthetic accounts"], ["appointments", "Appointments", `${data.appointments.length} planned`], ["settings", "Settings", "Large text and quiet mode"], ["log", "Consent history", "Every change to your sharing choices"] ] as const;
+  return <><h1>My KBC</h1>{section === "hub" ? <><div className="panel list-panel">{nav.map(([id, title, subtitle]) => <button className="data-row nav-row" key={id} onClick={() => setSection(id)}><span><strong>{title}</strong><small>{subtitle}</small></span><b>›</b></button>)}</div><button className="text-button" onClick={() => setModal("reset")}>Reset demo data</button></> : <><nav className="subnav" aria-label="My KBC sections">{nav.map(([id, title]) => <button key={id} className={section === id ? "on" : ""} onClick={() => { setSection(id); setBooking(false); }}>{title === "Privacy and sharing" ? "Privacy" : title === "Consent history" ? "Log" : title}</button>)}</nav>
+    {section === "profile" && <><h2>Your profile</h2><div className="panel list-panel">{[ ["Name", data.customer.name], ["Age", String(data.customer.profile.age)], ["City", data.customer.profile.city], ["Occupation", data.customer.profile.occupation], ["Synthetic balance", money(data.customer.profile.balance)] ].map(([label,value]) => <div className="data-row" key={label}><strong>{label}</strong><span>{value}</span></div>)}</div><h2>Information sources</h2><div className="panel"><p>Profiles and balances are fictitious seed data. Life moments come only from what you report. Shared information comes only from explicit per-person permission.</p></div></>}
+    {section === "privacy" && <><h2>Privacy and sharing</h2><p className="muted">Membership never shares private information automatically. Choose separately for each person and category.</p>{data.sharing.length ? data.sharing.map((peer) => <div className="panel privacy-card" key={peer.recipientId}><h3>{peer.recipientName}</h3>{(["balance", "moments"] as Category[]).map((category) => <div className="privacy-row" key={category}><span><strong>{category === "balance" ? "Balance" : "Life moments"}</strong><small>{category === "balance" ? "Your synthetic total" : "Non-sensitive moments you report"}</small></span><button className="switch" role="switch" aria-checked={peer[category]} aria-label={`Share ${category} with ${peer.recipientName}`} disabled={busy} onClick={() => void mutate({ action: "consent", subjectId: data.customer.id, recipientId: peer.recipientId, category, granted: !peer[category] }, `${category === "balance" ? "Balance" : "Life moments"} sharing with ${peer.recipientName} is now ${peer[category] ? "off" : "on"}.`)}><span/></button></div>)}</div>) : <div className="panel">Join a Circle to choose what you share.</div>}<p className="small muted">Turning sharing off blocks future reads. Other members see the change on their next refresh. Previously seen information cannot be recalled.</p><button className="text-button" onClick={() => setSection("log")}>View consent history →</button></>}
+    {section === "products" && <><h2>Your demo products</h2><div className="panel list-panel">{data.money.accounts.map((account) => <div className="data-row" key={account.id}><span><strong>{account.name}</strong><small>{account.iban}</small></span><b>{money(account.balance)}</b></div>)}</div><p className="small muted">Fictitious accounts. No account opening, transfers, or real banking activity.</p></>}
+    {section === "appointments" && (booking ? <><button className="back" onClick={() => setBooking(false)}>‹ Back to appointments</button><h2>Plan a demo conversation</h2><p className="muted">This creates a local demo record only. No one is contacted.</p><form className="panel form-panel" onSubmit={async (event) => { event.preventDefault(); if (await mutate({ action: "appointment", topic, channel, date: when }, "Demo appointment saved. No one was contacted.")) setBooking(false); }}><label htmlFor="topic">Topic</label><select id="topic" value={topic} onChange={(event) => setTopic(event.target.value)}>{["General question", "Home and family", "Budget conversation", "Care for a parent"].map((value) => <option key={value}>{value}</option>)}</select><label htmlFor="channel">How</label><select id="channel" value={channel} onChange={(event) => setChannel(event.target.value)}>{["In branch", "Video call", "Phone call"].map((value) => <option key={value}>{value}</option>)}</select><label htmlFor="when">Date and time</label><input id="when" type="datetime-local" value={when} onChange={(event) => setWhen(event.target.value)} required/><button className="button primary" disabled={busy}>Save demo appointment</button></form></> : <><h2>Appointments</h2>{data.appointments.length ? <div className="panel list-panel">{data.appointments.map((item) => <div className="data-row" key={item.id}><span><strong>{item.topic}</strong><small>{item.channel}</small></span><b>{new Date(item.date).toLocaleString("en-GB")}</b></div>)}</div> : <p className="muted">No demo appointments planned.</p>}<button className="button primary" onClick={() => setBooking(true)}>Plan a conversation</button></>)}
+    {section === "settings" && <><h2>Settings</h2><div className="panel privacy-card"><div className="privacy-row"><span><strong>Large text</strong><small>Increase interface text size</small></span><button className="switch" role="switch" aria-label="Large text" aria-checked={data.settings.largeText} disabled={busy} onClick={() => void mutate({ action: "setting", key: "largeText", value: !data.settings.largeText }, "Text size updated.")}><span/></button></div><div className="privacy-row"><span><strong>Quiet mode</strong><small>Keep guidance on Moments; reduce Overview prompts</small></span><button className="switch" role="switch" aria-label="Quiet mode" aria-checked={data.settings.quietMode} disabled={busy} onClick={() => void mutate({ action: "setting", key: "quietMode", value: !data.settings.quietMode }, "Quiet mode updated.")}><span/></button></div></div></>}
+    {section === "log" && <><h2>Consent history</h2><div className="panel list-panel">{data.consentHistory.length ? data.consentHistory.map((event) => <div className="data-row" key={event.id}><span><strong>{event.category === "balance" ? "Balance" : "Life moments"} {event.granted ? "shared" : "stopped"} with {event.recipientName}</strong><small>{new Date(event.timestamp).toLocaleString("en-GB")} · #{event.sequence}{event.reason === "household departure" ? " · Circle departure" : ""}</small></span></div>) : <p>No sharing choices yet. Everything is private by default.</p>}</div></>}
+    </>}</>;
 }

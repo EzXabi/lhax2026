@@ -22,6 +22,7 @@ export function Icon({
         <path d="M9 20v-7h6v7" />
       </>
     ),
+    card: <><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M15 15h3"/></>,
     me: (
       <>
         <circle cx="12" cy="7" r="4" />

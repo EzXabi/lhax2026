@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "KBC Home — Your home, your choices",
+  title: "KBC Circle — The customer shares, KBC guides",
   description:
     "The customer shares, KBC guides. A household demonstration with fictitious data.",
 };

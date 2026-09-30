@@ -1,5 +1,6 @@
 // Public response types only. This module contains no private records.
 export type Category = "balance" | "moments";
+export type { MomentType } from "./moment-catalog";
 export type ChecklistItem = { id: string; text: string; done: boolean };
 export type CardView = {
   id: string;
@@ -57,4 +58,11 @@ export type Snapshot = {
   }[];
   cards: CardView[];
   ownMoments: { id: string; label: string; createdAt: string }[];
+  money: {
+    accounts: { id: string; name: string; iban: string; balance: number; transactions: { id: string; label: string; amount: number; date: string; category: string }[] }[];
+    budgets: { category: string; limit: number; spent: number }[];
+    goals: { id: string; name: string; target: number; saved: number }[];
+  };
+  appointments: { id: string; topic: string; date: string; channel: string }[];
+  settings: { largeText: boolean; quietMode: boolean };
 };

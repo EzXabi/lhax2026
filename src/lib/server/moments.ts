@@ -1,29 +1,18 @@
 import "server-only";
 import type { CardView, Snapshot } from "../contracts";
+import { isMomentType, momentCatalog, type MomentType } from "../moment-catalog";
 import { activeMembership, canAccess } from "./permissions";
 import { audit, customer, DomainError, id, store } from "./store";
+import { ownMoney } from "./services";
 
-const RULE_ID = "PARENT_MOVES_IN_V1";
-const checklist = [
-  {
-    id: "home-insurance",
-    text: "Review your home insurance information together.",
-  },
-  {
-    id: "household-arrangements",
-    text: "Discuss household arrangements and everyday responsibilities.",
-  },
-  {
-    id: "sharing-choices",
-    text: "Choose which information to share, and with whom.",
-  },
-];
+const steps = (type: MomentType) => momentCatalog[type].steps.map((text, index) => ({ id: type === "parent_moves_in" ? ["home-insurance", "household-arrangements", "sharing-choices"][index] : `step-${index}`, text }));
 export const momentLabel = "I am moving in with my son.";
 
 export function syncCards() {
   for (const moment of store().moments) {
     for (const recipient of store().customers) {
       if (!canAccess(recipient.id, moment.ownerId, "moments")) continue;
+      if (recipient.id !== moment.ownerId && momentCatalog[moment.type].sensitive) continue;
       if (
         store().cards.some(
           (c) =>
@@ -35,26 +24,27 @@ export function syncCards() {
         id: id("card"),
         recipientId: recipient.id,
         sourceMomentId: moment.id,
-        ruleId: RULE_ID,
-        checklistIds: checklist.map((c) => c.id),
+        ruleId: `${moment.type.toUpperCase()}_V1`,
+        checklistIds: steps(moment.type).map((c) => c.id),
         completedIds: [],
         dismissed: false,
       });
     }
   }
 }
-export function reportMoment(actorId: string) {
+export function reportMoment(actorId: string, type: MomentType = "parent_moves_in") {
   customer(actorId);
+  if (!isMomentType(type)) throw new DomainError("Choose a supported life moment.");
   // Only one supported event per persona in this compact demo; retries are safe.
   if (
     !store().moments.some(
-      (m) => m.ownerId === actorId && m.type === "parent_moves_in",
+      (m) => m.ownerId === actorId && m.type === type,
     )
   ) {
     const moment = {
       id: id("moment"),
       ownerId: actorId,
-      type: "parent_moves_in" as const,
+      type,
       createdAt: new Date().toISOString(),
     };
     store().moments.push(moment);
@@ -63,7 +53,7 @@ export function reportMoment(actorId: string) {
   syncCards();
   // Explicitly reporting again reopens the owner's checklist without duplicating
   // the event or undoing another recipient's dismissal.
-  const ownMoment = store().moments.find((m) => m.ownerId === actorId);
+  const ownMoment = store().moments.find((m) => m.ownerId === actorId && m.type === type);
   const ownCard = store().cards.find(
     (c) => c.recipientId === actorId && c.sourceMomentId === ownMoment?.id,
   );
@@ -75,7 +65,7 @@ function authorizedCard(actorId: string, cardId: string) {
   );
   const moment =
     card && store().moments.find((m) => m.id === card.sourceMomentId);
-  if (!card || !moment || !canAccess(actorId, moment.ownerId, "moments")) {
+  if (!card || !moment || !canAccess(actorId, moment.ownerId, "moments") || (actorId !== moment.ownerId && momentCatalog[moment.type].sensitive)) {
     throw new DomainError("This guidance is no longer available to you.", 404);
   }
   return { card, moment };
@@ -84,23 +74,22 @@ export function cardView(actorId: string, cardId: string): CardView {
   const { card, moment } = authorizedCard(actorId, cardId);
   const owner = customer(moment.ownerId);
   const own = actorId === moment.ownerId;
+  const definition = momentCatalog[moment.type];
   return {
     id: card.id,
     kind: own ? "personal" : "household",
     createdAt: moment.createdAt,
-    title: own
-      ? "A new chapter, under one roof"
-      : `Make room for a new chapter with ${owner.name}`,
+    title: own ? definition.label : `${owner.name} shared a life moment`,
     body: own
-      ? "Moving in with your son is a big step. A few conversations today can help everyone feel at home."
-      : `${owner.name} reported: “I am moving in with my son.” Here are a few things you can discuss together.`,
-    checklist: checklist
+      ? "You told KBC about this change. Here are practical steps you can consider at your own pace."
+      : `${owner.name} reported: “${definition.label}” Here are a few things you can discuss together.`,
+    checklist: steps(moment.type)
       .filter((c) => card.checklistIds.includes(c.id))
       .map((c) => ({ ...c, done: card.completedIds.includes(c.id) })),
     explanation: {
       source: `Reported by ${owner.name}`,
       ruleId: card.ruleId,
-      rule: "When a customer reports ‘I am moving in with my son’, offer a practical household checklist. This is based on the reported moment, never on transactions.",
+      rule: `When a customer reports “${definition.label}”, offer a fixed practical checklist. This is based on the reported moment, never on transactions.`,
       permission: own
         ? "This is your own reported moment. No sharing permission is needed to see your own guidance."
         : `${owner.name} explicitly allowed life moments sharing with ${customer(actorId).name}. You are both active members of the same household. Balance sharing is separate.`,
@@ -159,10 +148,10 @@ export function snapshot(actorId: string): Snapshot {
               ...(canAccess(actorId, person.id, "moments")
                 ? {
                     moments: store()
-                      .moments.filter((m) => m.ownerId === person.id)
+                      .moments.filter((m) => m.ownerId === person.id && (actorId === person.id || !momentCatalog[m.type].sensitive))
                       .map((m) => ({
                         id: m.id,
-                        label: momentLabel,
+                        label: momentCatalog[m.type].label,
                         createdAt: m.createdAt,
                       })),
                   }
@@ -204,6 +193,9 @@ export function snapshot(actorId: string): Snapshot {
       }),
     ownMoments: store()
       .moments.filter((m) => m.ownerId === actorId)
-      .map((m) => ({ id: m.id, label: momentLabel, createdAt: m.createdAt })),
+      .map((m) => ({ id: m.id, label: momentCatalog[m.type].label, createdAt: m.createdAt })),
+    money: ownMoney(actorId),
+    appointments: store().appointments.filter((a) => a.ownerId === actorId).map(({ id, topic, date, channel }) => ({ id, topic, date, channel })),
+    settings: (() => { const settings = store().settings.find((s) => s.ownerId === actorId); return { largeText: settings?.largeText ?? false, quietMode: settings?.quietMode ?? false }; })(),
   };
 }
