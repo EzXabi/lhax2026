@@ -17,12 +17,12 @@ Copy-Item .env.example .env.local
 
 Edit `.env.local`:
 
-- `DEMO_PASSWORD`: choose a non-empty demo password. All three demo personas use this password.
+- `DEMO_PASSWORD`: the public throwaway demo password is `123` by default. All three demo personas use this password.
 - `SESSION_SECRET`: use a random secret of at least 32 characters. Generate one with `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`.
 - `APP_ORIGIN`: optional canonical origin, without a trailing slash, such as `http://localhost:3000`. Set the external HTTPS origin if a trusted proxy terminates HTTPS. Leave blank for the local multi-host demo described below.
 - `ELEVENLABS_API_KEY`: optional. The entire core journey works without it. Optional voice/model overrides are in `.env.example`.
 
-The demo password can be a throwaway value such as `123`; it is not production authentication. Keep `SESSION_SECRET` private for any publicly reachable deployment. The app refuses sign-in if the password is empty or the session secret has fewer than 32 characters. Restart after changing environment variables.
+The demo password is not production authentication. Keep `SESSION_SECRET` private, including for local demos. Never commit `.env.local`. The app refuses sign-in if the password is empty or the session secret has fewer than 32 characters. Restart after changing environment variables; changing the secret signs out existing sessions.
 
 ```powershell
 npm run dev
